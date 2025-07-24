@@ -617,6 +617,7 @@ def main():
                 # Use the custom recorder's records instead of handler.records
                 log_messages = [f"{r.asctime} - {r.levelname} - {r.message}" for r in recorder.records]
                 st.text("\n".join(log_messages) if log_messages else "No logs available.")
+                recorder.records.clear()
 
 if __name__ == "__main__":
     main()
