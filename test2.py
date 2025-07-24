@@ -1656,7 +1656,7 @@ def main():
                                     }
                                     save_scheduled_post(scheduled_data)
                                     st.success(f"Post scheduled for {scheduled_datetime} UTC.")
-                                    st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes 5)).strftime("%Y-%m-%d %H:%M")
+                                    st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes = 5)).strftime("%Y-%m-%d %H:%M")
                                     st.rerun()
                                 else:
                                     st.error(error_msg)
