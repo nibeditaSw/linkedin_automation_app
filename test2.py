@@ -1331,6 +1331,8 @@ if hasattr(st, 'secrets') and st.secrets is not None:
         config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
     if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
         config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
+    if "CRON_API_KEY" in st.secrets:
+        config["CRON_API_KEY"] = st.secrets["CRON_API_KEY"]
 else:
     st.error("Streamlit secrets are not available.")
     logger.error("st.secrets is not available.")
@@ -1377,11 +1379,43 @@ def post_to_linkedin(post_text, access_token, user_id, image_url=None):
     response = session.post(url, headers=headers, json=payload)
     return response.status_code == 201
 
-def process_scheduled_posts():
+def create_cron_job(scheduled_datetime):
+    app_url = st.experimental_get_query_params().get("app_url", [os.environ.get("STREAMLIT_URL", "https://your-app-url.streamlit.app")])[0]
+    trigger_url = f"{app_url}?cron=trigger&post_id={{post_id}}"
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {config['CRON_API_KEY']}"}
+    payload = {
+        "job": {
+            "url": trigger_url,
+            "enabled": True,
+            "saveResponses": True,
+            "schedule": {
+                "timezone": "UTC",
+                "expiresAt": 0,
+                "minutes": [int(scheduled_datetime.strftime("%M"))],
+                "hours": [int(scheduled_datetime.strftime("%H"))],
+                "mdays": [int(scheduled_datetime.strftime("%d"))],
+                "months": [int(scheduled_datetime.strftime("%m"))],
+                "wdays": [int(scheduled_datetime.strftime("%w"))]
+            }
+        }
+    }
+    response = requests.put("https://api.cron-job.org/jobs", headers=headers, json=payload)
+    if response.status_code == 200:
+        job_id = response.json().get("jobId")
+        logger.info(f"Created cron job with ID: {job_id}")
+        return job_id
+    else:
+        logger.error(f"Failed to create cron job: {response.text}")
+        return None
+
+def process_scheduled_posts(post_id=None):
     scheduled_posts = load_scheduled_posts()
     now = datetime.now(pytz.UTC)
     updated_posts = []
     for post in scheduled_posts:
+        if post_id and post["Post_ID"] != post_id:
+            updated_posts.append(post)
+            continue
         scheduled_dt = datetime.strptime(post["Scheduled_DateTime"], "%Y-%m-%d %H:%M").replace(tzinfo=pytz.UTC)
         if now >= scheduled_dt and not post.get("Posted", False):
             user_id = get_linkedin_user_id(config["LINKEDIN_ACCESS_TOKEN"])
@@ -1675,7 +1709,11 @@ def main():
                                         "Posted": False
                                     }
                                     save_scheduled_post(scheduled_data)
-                                    st.success(f"Post scheduled for {scheduled_datetime} UTC.")
+                                    job_id = create_cron_job(datetime.strptime(scheduled_datetime, "%Y-%m-%d %H:%M").replace(tzinfo=pytz.UTC))
+                                    if job_id:
+                                        st.success(f"Post scheduled for {scheduled_datetime} UTC with cron job ID: {job_id}")
+                                    else:
+                                        st.error("Failed to schedule cron job.")
                                     st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes 5)).strftime("%Y-%m-%d %H:%M")
                                     st.rerun()
                                 else:
@@ -1723,9 +1761,10 @@ def main():
                                         st.error("Edited text cannot be empty.")
 
     # Trigger processing when app is hit by cron webhook
-    if st.experimental_get_query_params().get("cron", [None])[0] == "trigger":
-        process_scheduled_posts()
-        st.write("Cron job triggered. Check logs for posted updates.")
+    post_id = st.experimental_get_query_params().get("post_id", [None])[0]
+    if st.experimental_get_query_params().get("cron", [None])[0] == "trigger" and post_id:
+        process_scheduled_posts(post_id)
+        st.write(f"Cron job triggered for post ID: {post_id}. Check logs for posted updates.")
 
     with st.expander("View Log"):
         log_messages = [f"{r.asctime} - {r.levelname} - {r.message}" for r in recorder.records]
