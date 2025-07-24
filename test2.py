@@ -1714,7 +1714,7 @@ def main():
                                         st.success(f"Post scheduled for {scheduled_datetime} UTC with cron job ID: {job_id}")
                                     else:
                                         st.error("Failed to schedule cron job.")
-                                    st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes 5)).strftime("%Y-%m-%d %H:%M")
+                                    st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes = 5)).strftime("%Y-%m-%d %H:%M")
                                     st.rerun()
                                 else:
                                     st.error(error_msg)
