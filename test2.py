@@ -1022,8 +1022,8 @@ def create_input_template():
     """Create a template DataFrame for the input Excel file."""
     template_data = {
         'Type': ['content', 'prompt', 'content'],
-        'Text': ['Check out my latest blog post!', 'Write about AI trends', 'Excited for the new project!'],
-        'image': ['https://example.com/image1.jpg', '', 'https://example.com/image2.jpg']
+        'Text': ['Our startup’s new app is live! Check it out!', 'Create a post about a tech startup’s product launch', 'Our startup’s new app is live! Check it out!'],
+        'image': ['https://thumbs.dreamstime.com/b/innovative-medical-device-featuring-eye-image-illustrating-advanced-tracking-technology-generated-ai-358374352.jpg', 'https://thumbs.dreamstime.com/b/innovative-medical-device-featuring-eye-image-illustrating-advanced-tracking-technology-generated-ai-358374352.jpg', 'https://thumbs.dreamstime.com/b/innovative-medical-device-featuring-eye-image-illustrating-advanced-tracking-technology-generated-ai-358374352.jpg']
     }
     df = pd.DataFrame(template_data)
     output_buffer = BytesIO()
