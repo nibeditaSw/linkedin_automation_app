@@ -13,7 +13,31 @@ import uuid
 from datetime import datetime, timedelta
 import pytz
 
-# Configuration (use Streamlit secrets for API keys)
+# Custom log storage
+log_records = []
+
+# Setup logging with a custom handler to store records
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger()
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
+class LogRecorder:
+    def __init__(self):
+        self.records = []
+
+    def emit(self, record):
+        self.records.append(record)
+
+recorder = LogRecorder()
+recorder_handler = logging.StreamHandler()
+recorder_handler.setFormatter(formatter)
+recorder_handler.emit = recorder.emit
+logger.addHandler(recorder_handler)
+
+# Configuration (use Streamlit secrets with fallback)
 DEFAULT_CONFIG = {
     "MAX_DAILY_REQUESTS": 1000,  # RPD limit for free tier
     "REQUESTS_PER_POST": 2,  # 1 for text, ~1 for summarization
@@ -22,19 +46,38 @@ DEFAULT_CONFIG = {
     "LINKEDIN_RETRY_DELAY": 2,  # Seconds between retries
 }
 
-# Load config and secrets
+# Load config and secrets with explicit check
 config = DEFAULT_CONFIG.copy()
-if "GROQ_API_KEY" in st.secrets:
-    config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
-    config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
-
-# Setup logging (to Streamlit console in cloud)
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger()
+if hasattr(st, 'secrets') and st.secrets is not None:
+    if "GROQ_API_KEY" in st.secrets:
+        config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+        logger.info("GROQ_API_KEY loaded from secrets successfully.")
+    else:
+        st.error("GROQ_API_KEY not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
+        st.stop()
+    if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
+        config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
+        logger.info("LINKEDIN_ACCESS_TOKEN loaded from secrets successfully.")
+    else:
+        st.error("LINKEDIN_ACCESS_TOKEN not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
+        st.stop()
+else:
+    st.error("Streamlit secrets are not available. Ensure secrets are configured in the 'Manage app' section.")
+    logger.error("st.secrets is not available.")
+    st.stop()
 
 # Initialize Groq client
-client = Groq(api_key=config["GROQ_API_KEY"])
+try:
+    client = Groq(api_key=config["GROQ_API_KEY"])
+    logger.info("Groq client initialized successfully.")
+except KeyError as e:
+    st.error("Failed to initialize Groq client due to missing API key. Check secrets configuration.")
+    logger.error(f"KeyError initializing Groq client: {e}")
+    st.stop()
+except Exception as e:
+    st.error(f"Error initializing Groq client: {str(e)}. Check logs.")
+    logger.error(f"Exception initializing Groq client: {e}")
+    st.stop()
 
 # Initialize requests session with retries
 session = requests.Session()
@@ -571,7 +614,9 @@ def main():
                                         st.error("Edited text cannot be empty.")
                                         logger.warning("Edited text is empty, save aborted.")
             with st.expander("View Log"):
-                st.text("\n".join([f"{record.asctime} - {record.levelname} - {record.message}" for record in logger.handlers[0].records]))
+                # Use the custom recorder's records instead of handler.records
+                log_messages = [f"{r.asctime} - {r.levelname} - {r.message}" for r in recorder.records]
+                st.text("\n".join(log_messages) if log_messages else "No logs available.")
 
 if __name__ == "__main__":
     main()
