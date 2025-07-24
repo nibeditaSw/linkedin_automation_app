@@ -13,11 +13,7 @@ import uuid
 from datetime import datetime, timedelta
 import pytz
 
-# Setup logging first (to ensure logger is available)
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger()
-
-# Configuration (use Streamlit secrets with fallback)
+# Configuration (use Streamlit secrets for API keys)
 DEFAULT_CONFIG = {
     "MAX_DAILY_REQUESTS": 1000,  # RPD limit for free tier
     "REQUESTS_PER_POST": 2,  # 1 for text, ~1 for summarization
@@ -26,38 +22,19 @@ DEFAULT_CONFIG = {
     "LINKEDIN_RETRY_DELAY": 2,  # Seconds between retries
 }
 
-# Load config and secrets with explicit check
+# Load config and secrets
 config = DEFAULT_CONFIG.copy()
-if hasattr(st, 'secrets') and st.secrets is not None:
-    if "GROQ_API_KEY" in st.secrets:
-        config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-        logger.info("GROQ_API_KEY loaded from secrets successfully.")
-    else:
-        st.error("GROQ_API_KEY not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
-        st.stop()
-    if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
-        config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
-        logger.info("LINKEDIN_ACCESS_TOKEN loaded from secrets successfully.")
-    else:
-        st.error("LINKEDIN_ACCESS_TOKEN not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
-        st.stop()
-else:
-    st.error("Streamlit secrets are not available. Ensure secrets are configured in the 'Manage app' section.")
-    logger.error("st.secrets is not available.")
-    st.stop()
+if "GROQ_API_KEY" in st.secrets:
+    config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
+    config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
+
+# Setup logging (to Streamlit console in cloud)
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger()
 
 # Initialize Groq client
-try:
-    client = Groq(api_key=config["GROQ_API_KEY"])
-    logger.info("Groq client initialized successfully.")
-except KeyError as e:
-    st.error("Failed to initialize Groq client due to missing API key. Check secrets configuration.")
-    logger.error(f"KeyError initializing Groq client: {e}")
-    st.stop()
-except Exception as e:
-    st.error(f"Error initializing Groq client: {str(e)}. Check logs.")
-    logger.error(f"Exception initializing Groq client: {e}")
-    st.stop()
+client = Groq(api_key=config["GROQ_API_KEY"])
 
 # Initialize requests session with retries
 session = requests.Session()
