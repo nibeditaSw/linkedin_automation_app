@@ -12,59 +12,52 @@ from urllib3.util.retry import Retry
 import uuid
 from datetime import datetime, timedelta
 import pytz
-import subprocess
-import shutil
-import locale
 
-# Configuration
+# Setup logging first (to ensure logger is available)
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger()
+
+# Configuration (use Streamlit secrets with fallback)
 DEFAULT_CONFIG = {
-    "GROQ_API_KEY": "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",  # Replace with your Groq API key
-    "LINKEDIN_ACCESS_TOKEN": "AQVaczcAIC8P53brcFlOHlqfePBedN03pC4TSuBh16P_g7jR_I2B3VbrRHevLcnXBw3RKG1y-S3w6k8N79XwU98SvKMqv--xGSY6Vx3N5q1hClRG7wt9FDRI6bfVeix-sXB5dz8fUAL8UicNY8vcnqaSG5nU7Rrd9aY3Jrlc0J59mS-jppS3jDhzJ6fkKx7O0axBjkSsK-YcMe1Ebe9aIjq3cBD9JnxhtgcxlDVsaO9ANf60UV1ZlLeKkTQtY86wtILgA5XBCilO14Mj8H5DfzSALkCox-2jLJVo29jMo6JXUr345YGpjrb9FSjY1QGJDn3SLNjOit-CY06JbjCQ6eLmQT36PA",
-    "LOG_FILE": "automation_log.txt",
-    "SCHEDULE_FILE": "schedule.json",
-    "MAX_DAILY_REQUESTS": 1000,  # Updated to match RPD for free tier
+    "MAX_DAILY_REQUESTS": 1000,  # RPD limit for free tier
     "REQUESTS_PER_POST": 2,  # 1 for text, ~1 for summarization
     "NUM_VARIATIONS": 3,  # Number of variations for prompt
     "LINKEDIN_RETRIES": 3,  # Number of retries for LinkedIn API calls
     "LINKEDIN_RETRY_DELAY": 2,  # Seconds between retries
-    "PYTHON_EXECUTABLE": "C:/Users/nibed/AppData/Local/Programs/Python/Python311/python.exe"
 }
 
-# Load or create config
-CONFIG_FILE = "config.json"
-try:
-    with open(CONFIG_FILE, "r") as f:
-        loaded_config = json.load(f)
-    config = DEFAULT_CONFIG | loaded_config
-except FileNotFoundError:
-    config = DEFAULT_CONFIG
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-except Exception as e:
-    logger = logging.getLogger()
-    logger.error(f"Error loading config.json: {e}")
-    config = DEFAULT_CONFIG
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
-
-# Setup logging
-logging.basicConfig(
-    filename=config["LOG_FILE"],
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger()
-
-# Check system locale
-try:
-    system_locale = locale.getlocale()
-    logger.info(f"System locale: {system_locale}")
-except Exception as e:
-    logger.warning(f"Could not determine system locale: {e}")
-    system_locale = None
+# Load config and secrets with explicit check
+config = DEFAULT_CONFIG.copy()
+if hasattr(st, 'secrets') and st.secrets is not None:
+    if "GROQ_API_KEY" in st.secrets:
+        config["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+        logger.info("GROQ_API_KEY loaded from secrets successfully.")
+    else:
+        st.error("GROQ_API_KEY not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
+        st.stop()
+    if "LINKEDIN_ACCESS_TOKEN" in st.secrets:
+        config["LINKEDIN_ACCESS_TOKEN"] = st.secrets["LINKEDIN_ACCESS_TOKEN"]
+        logger.info("LINKEDIN_ACCESS_TOKEN loaded from secrets successfully.")
+    else:
+        st.error("LINKEDIN_ACCESS_TOKEN not found in Streamlit secrets. Please verify and add it in the 'Manage app' secrets section.")
+        st.stop()
+else:
+    st.error("Streamlit secrets are not available. Ensure secrets are configured in the 'Manage app' section.")
+    logger.error("st.secrets is not available.")
+    st.stop()
 
 # Initialize Groq client
-client = Groq(api_key=config["GROQ_API_KEY"])
+try:
+    client = Groq(api_key=config["GROQ_API_KEY"])
+    logger.info("Groq client initialized successfully.")
+except KeyError as e:
+    st.error("Failed to initialize Groq client due to missing API key. Check secrets configuration.")
+    logger.error(f"KeyError initializing Groq client: {e}")
+    st.stop()
+except Exception as e:
+    st.error(f"Error initializing Groq client: {str(e)}. Check logs.")
+    logger.error(f"Exception initializing Groq client: {e}")
+    st.stop()
 
 # Initialize requests session with retries
 session = requests.Session()
@@ -80,7 +73,7 @@ def get_linkedin_user_id(access_token):
     """Fetch LinkedIn user ID using the /rest/me API."""
     if not access_token:
         logger.error("LinkedIn access token is empty.")
-        st.error("LinkedIn access token is empty. Please provide a valid token in the sidebar.")
+        st.error("LinkedIn access token is missing. Please add it to Streamlit secrets.")
         return None
     url = "https://api.linkedin.com/rest/me"
     headers = {
@@ -103,11 +96,11 @@ def get_linkedin_user_id(access_token):
         return user_id
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error fetching LinkedIn user ID: {e}, Status: {response.status_code}, Response: {response.text}")
-        st.error(f"HTTP {response.status_code}: {response.text}. Check {config['LOG_FILE']} and verify LinkedIn access token.")
+        st.error(f"HTTP {response.status_code}: {response.text}. Check logs.")
         return None
     except Exception as e:
         logger.error(f"Error fetching LinkedIn user ID: {e}")
-        st.error(f"Failed to fetch LinkedIn user ID: {str(e)}. Check {config['LOG_FILE']}.")
+        st.error(f"Failed to fetch LinkedIn user ID: {str(e)}. Check logs.")
         return None
 
 def register_image_upload(access_token, user_id):
@@ -230,7 +223,7 @@ def enhance_content(content):
         return result
     except Exception as e:
         logger.error(f"Error enhancing content: {e}")
-        st.error("Failed to enhance content. Check automation_log.txt.")
+        st.error("Failed to enhance content. Check logs.")
         return None
 
 def generate_content(prompt, num_variations):
@@ -250,7 +243,7 @@ def generate_content(prompt, num_variations):
             logger.info(f"Generated variation {i+1} successfully. Tokens used: {response.usage.prompt_tokens + response.usage.completion_tokens}")
         except Exception as e:
             logger.error(f"Error generating post {i+1}: {e}")
-            st.error(f"Failed to generate post variation {i+1}. Check automation_log.txt.")
+            st.error(f"Failed to generate post variation {i+1}. Check logs.")
             posts.append((None, i + 1))
     return posts
 
@@ -362,86 +355,6 @@ def validate_schedule_datetime(schedule_datetime, test_mode=False):
         logger.warning(f"Invalid schedule datetime format: {schedule_datetime}. {error_msg}")
         return False, error_msg
 
-def load_schedule():
-    """Load scheduled posts from schedule.json."""
-    try:
-        if os.path.exists(config["SCHEDULE_FILE"]):
-            with open(config["SCHEDULE_FILE"], "r") as f:
-                return json.load(f)
-        return []
-    except Exception as e:
-        logger.error(f"Error loading schedule.json: {e}")
-        return []
-
-def save_schedule(scheduled_posts):
-    """Save scheduled posts to schedule.json."""
-    try:
-        with open(config["SCHEDULE_FILE"], "w") as f:
-            json.dump(scheduled_posts, f, indent=2)
-        logger.info(f"Saved {len(scheduled_posts)} scheduled posts to {config['SCHEDULE_FILE']}")
-    except Exception as e:
-        logger.error(f"Error saving schedule.json: {e}")
-
-def create_batch_script(post_id, scheduled_datetime):
-    """Create a batch script to run the Python script at the scheduled time."""
-    try:
-        python_exe = config["PYTHON_EXECUTABLE"]
-        if not shutil.which(python_exe):
-            logger.error(f"Python executable not found: {python_exe}")
-            return False, f"Python executable not found: {python_exe}. Update PYTHON_EXECUTABLE in config.json."
-        
-        script_path = os.path.abspath("post_to_linkedin.py")
-        if not os.path.exists(script_path):
-            logger.error(f"post_to_linkedin.py not found at: {script_path}")
-            return False, f"post_to_linkedin.py not found at: {script_path}"
-        
-        schedule_dt = datetime.strptime(scheduled_datetime, "%Y-%m-%d %H:%M")
-        schedule_dt = pytz.UTC.localize(schedule_dt)
-        
-        local_tz = datetime.now().astimezone().tzinfo
-        schedule_dt_local = schedule_dt.astimezone(local_tz)
-        now_local = datetime.now().astimezone(local_tz)
-        delay_seconds = int((schedule_dt_local - now_local).total_seconds())
-        
-        if delay_seconds < 0:
-            logger.error(f"Scheduled time {scheduled_datetime} UTC is in the past.")
-            return False, "Scheduled time is in the past."
-        
-        batch_content = f"""@echo off
-echo Starting scheduled post for Post_ID: {post_id} at {datetime.now().strftime("%H:%M:%S %d/%m/%Y")}
-timeout /t {delay_seconds} /nobreak
-"{python_exe}" "{script_path}" "{post_id}"
-if %errorlevel% equ 0 (
-    echo Successfully posted Post_ID: {post_id}
-) else (
-    echo Failed to post Post_ID: {post_id}, check {config["LOG_FILE"]}
-)
-"""
-        batch_file = os.path.join(os.getcwd(), f"post_{post_id}.bat")
-        with open(batch_file, "w") as f:
-            f.write(batch_content)
-        logger.info(f"Created batch script {batch_file} for Post_ID {post_id} with delay {delay_seconds} seconds")
-        return True, f"Batch script created at {batch_file} for automatic execution by scheduler."
-    except Exception as e:
-        logger.error(f"Error creating batch script for post {post_id}: {e}")
-        return False, f"Error creating batch script: {str(e)}"
-
-def test_batch_script():
-    """Test batch script creation with a dummy task."""
-    try:
-        test_post_id = "test123"
-        test_time = (datetime.now(pytz.UTC) + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
-        success, message = create_batch_script(test_post_id, test_time)
-        if success:
-            logger.info(f"Test batch script created successfully: {message}")
-            return True, "Test batch script created. Check the generated .bat file."
-        else:
-            logger.error(f"Test batch script failed: {message}")
-            return False, f"Test batch script failed: {message}"
-    except Exception as e:
-        logger.error(f"Error testing batch script: {e}")
-        return False, f"Error testing batch script: {str(e)}"
-
 def generate_schedule_csv(df):
     """Generate a CSV for manual scheduling as a fallback."""
     schedule_rows = df[df['Scheduled_DateTime'].notna()][['Post_ID', 'Output_Text', 'Scheduled_DateTime', 'image']]
@@ -456,34 +369,17 @@ def generate_schedule_csv(df):
     logger.info("Generated schedule.csv for download")
     return output_buffer.getvalue()
 
-def start_scheduler():
-    """Start the scheduler script in a separate process."""
-    scheduler_path = os.path.abspath("scheduler.py")
-    if os.path.exists(scheduler_path):
-        try:
-            subprocess.Popen([config["PYTHON_EXECUTABLE"], scheduler_path], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-            logger.info(f"Started scheduler process from {scheduler_path}")
-        except Exception as e:
-            logger.error(f"Error starting scheduler: {e}")
-            st.error(f"Failed to start scheduler. Check {config['LOG_FILE']}.")
-    else:
-        logger.error(f"scheduler.py not found at {scheduler_path}")
-        st.error(f"scheduler.py not found at {scheduler_path}. Ensure it exists in the same directory.")
-
 def main():
-    """Streamlit UI for LinkedIn content automation with automated batch script execution."""
-    st.title("LinkedIn Content Automation with Automated Scheduling")
+    """Streamlit UI for LinkedIn content automation."""
+    st.title("LinkedIn Content Automation")
     st.markdown("""
     Upload an Excel file with 'Type' (content or prompt), 'Text', and optional 'image' (URL) columns.
     - 'content': Enhances the provided text into a professional LinkedIn post.
     - 'prompt': Generates multiple post variations based on the prompt.
     Use the buttons below to enhance or generate posts. Edit posts using the 'Edit' button, 
-    schedule posts using the 'Schedule' button (automated via scheduler.py), 
-    or post immediately with 'Post to LinkedIn'. Ensure the LinkedIn access token matches the one used in Postman.
-    Results are saved to output.xlsx. Scheduled posts are stored in schedule.json and executed automatically.
-    Fallback: Download schedule.csv for manual scheduling in LinkedIn or Hootsuite.
-    **Note**: Run the app without admin privileges. Ensure Python, post_to_linkedin.py, and scheduler.py are accessible.
-    The scheduler runs in the background and executes .bat files at the scheduled time.
+    or post immediately with 'Post to LinkedIn'. Ensure the LinkedIn access token is added to Streamlit secrets.
+    Results are downloadable as output.xlsx. Use schedule.csv for manual scheduling in LinkedIn or Hootsuite.
+    **Note**: Scheduling is not supported on Streamlit Cloud; use the downloaded CSV for manual scheduling.
     """)
 
     # Initialize session state
@@ -498,40 +394,13 @@ def main():
     if 'scheduled_datetime' not in st.session_state:
         st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
 
-    # Log session state for debugging
-    logger.debug(f"Initial session state: editing_post_id={st.session_state.editing_post_id}, scheduling_post_id={st.session_state.scheduling_post_id}, posts={json.dumps(convert_pd_na_to_none(st.session_state.posts), indent=2)}")
-
     # Debug UI
     st.write(f"**Debug**: Current editing_post_id: {st.session_state.editing_post_id}, scheduling_post_id: {st.session_state.scheduling_post_id}")
-    st.write(f"**System Locale**: {system_locale if system_locale else 'Unknown (check Control Panel > Region > Formats)'}")
 
     # Config settings
     st.sidebar.header("Settings")
-    config["GROQ_API_KEY"] = st.sidebar.text_input("Groq API Key", config["GROQ_API_KEY"], type="password")
-    config["LINKEDIN_ACCESS_TOKEN"] = st.sidebar.text_input("LinkedIn Access Token", config["LINKEDIN_ACCESS_TOKEN"], type="password")
     config["NUM_VARIATIONS"] = st.sidebar.slider("Number of Variations for Prompts", 1, 5, config.get("NUM_VARIATIONS", 3))
-    config["PYTHON_EXECUTABLE"] = st.sidebar.text_input("Python Executable Path", config["PYTHON_EXECUTABLE"])
     test_mode = st.sidebar.checkbox("Enable Test Mode (Min 5 mins from now)", value=False)
-
-    # Save updated config
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving config.json: {e}")
-        st.error(f"Error saving config.json. Check {config['LOG_FILE']}.")
-
-    # Start scheduler on app launch
-    start_scheduler()
-
-    # Test batch script button
-    if st.sidebar.button("Test Batch Script"):
-        success, message = test_batch_script()
-        if success:
-            st.sidebar.success(message)
-        else:
-            st.sidebar.error(message)
-            st.sidebar.info("Ensure Python and post_to_linkedin.py are in your user path. Check the generated .bat file.")
 
     # File uploader
     uploaded_file = st.file_uploader("Upload input.xlsx", type=["xlsx"])
@@ -546,7 +415,7 @@ def main():
             logger.info(f"Successfully read uploaded Excel with {len(df)} rows.")
         except Exception as e:
             logger.error(f"Error reading Excel file: {e}")
-            st.error(f"Error reading Excel file. Ensure it has 'Type' and 'Text' columns. Check {config['LOG_FILE']}.")
+            st.error(f"Error reading Excel file. Ensure it has 'Type' and 'Text' columns. Check logs.")
             return
         
         if not {'Type', 'Text'}.issubset(df.columns):
@@ -594,11 +463,11 @@ def main():
                     )
                 except Exception as e:
                     logger.error(f"Error saving to Excel: {e}")
-                    st.error(f"Error saving Excel file. Check {config['LOG_FILE']}.")
+                    st.error(f"Error saving Excel file. Check logs.")
             
             else:
                 logger.info(f"No {process_type} rows processed.")
-                st.warning(f"No {process_type} rows processed. Check input.xlsx and automation_log.txt.")
+                st.warning(f"No {process_type} rows processed. Check input.xlsx and logs.")
         
         # Generate and offer schedule.csv download
         schedule_csv = generate_schedule_csv(df)
@@ -635,7 +504,7 @@ def main():
                     if post['Posted']:
                         st.write("**Status**: Posted to LinkedIn")
                     elif pd.notna(post.get('Scheduled_DateTime')):
-                        st.write(f"**Status**: Scheduled for {post['Scheduled_DateTime']} UTC (Pending)")
+                        st.write(f"**Status**: Scheduled for {post['Scheduled_DateTime']} UTC (Manual)")
                     else:
                         with st.form(key=f"edit_form_{post['Post_ID']}"):
                             edited_text = st.text_area("Edit Text:", value=post['Output_Text'], key=f"edit_text_{post['Post_ID']}")
@@ -648,17 +517,37 @@ def main():
                                 st.rerun()
                         
                         with st.form(key=f"schedule_form_{post['Post_ID']}"):
+                            scheduled_datetime = st.text_input(
+                                "Schedule Date and Time (YYYY-MM-DD HH:MM, UTC):",
+                                value=st.session_state.scheduled_datetime,
+                                key=f"schedule_datetime_{post['Post_ID']}"
+                            )
                             if st.form_submit_button("Schedule"):
                                 logger.debug(f"Schedule button clicked for post {i}, Post_ID: {post['Post_ID']}")
-                                st.session_state.scheduling_post_id = post['Post_ID']
-                                st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
-                                st.rerun()
+                                is_valid, error_msg = validate_schedule_datetime(scheduled_datetime, test_mode)
+                                if is_valid:
+                                    df.loc[df['Post_ID'] == post['Post_ID'], 'Scheduled_DateTime'] = scheduled_datetime
+                                    post['Scheduled_DateTime'] = scheduled_datetime
+                                    try:
+                                        output_buffer = BytesIO()
+                                        df.to_excel(output_buffer, index=False)
+                                        logger.info(f"Updated Excel with scheduled post: {post['Output_Text'][:50]}...")
+                                    except Exception as e:
+                                        logger.error(f"Error saving Excel after scheduling: {e}")
+                                        st.error(f"Error saving Excel after scheduling. Check logs.")
+                                    st.success(f"Post scheduled for {scheduled_datetime} UTC. Download schedule.csv for manual posting.")
+                                    st.session_state.scheduling_post_id = None
+                                    st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+                                    st.rerun()
+                                else:
+                                    st.error(error_msg)
+                                    logger.warning(f"Invalid schedule datetime: {error_msg}")
                         
                         if st.button("Post to LinkedIn", key=f"post_{post['Post_ID']}"):
                             logger.debug(f"Post to LinkedIn button clicked for post {i}: {post['Output_Text'][:50]}..., Post_ID: {post['Post_ID']}")
                             if not config["LINKEDIN_ACCESS_TOKEN"]:
                                 logger.error("LinkedIn access token missing.")
-                                st.error("LinkedIn access token is missing. Add it in the sidebar.")
+                                st.error("LinkedIn access token is missing. Add it to Streamlit secrets.")
                             else:
                                 user_id = get_linkedin_user_id(config["LINKEDIN_ACCESS_TOKEN"])
                                 if user_id:
@@ -672,7 +561,7 @@ def main():
                                             logger.info("Updated Excel with Posted status")
                                         except Exception as e:
                                             logger.error(f"Error saving Excel after posting: {e}")
-                                            st.error(f"Error saving Excel after posting. Check {config['LOG_FILE']}.")
+                                            st.error(f"Error saving Excel after posting. Check logs.")
                                         st.rerun()
                         
                         if st.session_state.editing_post_id == post['Post_ID']:
@@ -696,7 +585,7 @@ def main():
                                             st.success("Post updated successfully!")
                                         except Exception as e:
                                             logger.error(f"Error saving Excel after editing: {e}")
-                                            st.error(f"Error saving Excel after editing. Check {config['LOG_FILE']}.")
+                                            st.error(f"Error saving Excel after editing. Check logs.")
                                         st.session_state.editing_post_id = None
                                         st.session_state.edited_text = ""
                                         st.session_state.edited_image = ""
@@ -704,54 +593,8 @@ def main():
                                     else:
                                         st.error("Edited text cannot be empty.")
                                         logger.warning("Edited text is empty, save aborted.")
-                        
-                        if st.session_state.scheduling_post_id == post['Post_ID']:
-                            with st.form(key=f"save_schedule_form_{post['Post_ID']}"):
-                                st.write("**Schedule Post**")
-                                scheduled_datetime = st.text_input(
-                                    "Schedule Date and Time (YYYY-MM-DD HH:MM, UTC):",
-                                    value=st.session_state.scheduled_datetime,
-                                    key=f"schedule_datetime_{post['Post_ID']}"
-                                )
-                                if st.form_submit_button("Save Schedule"):
-                                    logger.debug(f"Save Schedule button clicked for Post_ID: {post['Post_ID']}, Scheduled DateTime: {scheduled_datetime}")
-                                    is_valid, error_msg = validate_schedule_datetime(scheduled_datetime, test_mode)
-                                    if is_valid:
-                                        df.loc[df['Post_ID'] == post['Post_ID'], 'Scheduled_DateTime'] = scheduled_datetime
-                                        post['Scheduled_DateTime'] = scheduled_datetime
-                                        try:
-                                            output_buffer = BytesIO()
-                                            df.to_excel(output_buffer, index=False)
-                                            logger.info(f"Updated Excel with scheduled post: {post['Output_Text'][:50]}...")
-                                        except Exception as e:
-                                            logger.error(f"Error saving Excel after scheduling: {e}")
-                                            st.error(f"Error saving Excel after scheduling. Check {config['LOG_FILE']}.")
-                                        scheduled_posts = load_schedule()
-                                        scheduled_posts.append({
-                                            "Post_ID": post['Post_ID'],
-                                            "Output_Text": post['Output_Text'],
-                                            "Scheduled_DateTime": scheduled_datetime,
-                                            "Posted": False,
-                                            "image": post.get('image')
-                                        })
-                                        save_schedule(scheduled_posts)
-                                        success, message = create_batch_script(post['Post_ID'], scheduled_datetime)
-                                        if success:
-                                            st.success(f"Post scheduled for {scheduled_datetime} UTC! {message}")
-                                        else:
-                                            st.error(f"Failed to schedule post: {message}. Check {config['LOG_FILE']}.")
-                                        st.session_state.scheduling_post_id = None
-                                        st.session_state.scheduled_datetime = (datetime.now(pytz.UTC) + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
-                                        st.rerun()
-                                    else:
-                                        st.error(error_msg)
-                                        logger.warning(f"Invalid schedule datetime: {error_msg}")
             with st.expander("View Log"):
-                try:
-                    with open(config["LOG_FILE"], "r") as f:
-                        st.text(f.read())
-                except:
-                    st.warning("Log file not found.")
+                st.text("\n".join([f"{record.asctime} - {record.levelname} - {record.message}" for record in logger.handlers[0].records]))
 
 if __name__ == "__main__":
     main()
